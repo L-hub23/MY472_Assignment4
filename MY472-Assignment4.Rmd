@@ -240,10 +240,11 @@ written_qs <- written_qs %>%
 #Combine written and oral question tables into one
 oral_written_qs <- bind_rows(oral_qs, written_qs)
 
+# removing titles to ensure uniformity of name formats
+oral_written_qs$MP <- gsub("Dr\ |Mr\ |Ms\ |Mrs\ |Dame\ |Sir\ ", "", oral_written_qs$MP)
+
 # Get vector with names of asking MPs
 AskingMPs <- unique(oral_written_qs$MP)
-# Removing titles
-AskingMPs <- gsub("Dr\ |Mr\ |Ms\ |Mrs\ |Dame\ |Sir\ ", "", AskingMPs)
 ```
 
 ```{r, eval=FALSE}
@@ -294,6 +295,174 @@ file_checker <- function(db_name, table_name) {
 ```{r, eval=TRUE, echo=TRUE}
 file_checker(db, "All_Questions")
 ```
+
+To analyze MP characteristics, additional data is necessary. This research will look at MP's party, age, their position on the political left-right scale and their constituency's median wage. 
+
+Information on the MP's ages was taken from Wikipedia using webscraping: https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election
+
+    -> note some MPs have died during the term, for them age will then be NA since the fact that they died before completing the term means they did not have as much time to ask things as the others which may impact results - this is the case for 3 MPs
+    
+Need to change the webscraping to only MPs who are in the four main tables! given the RQ, we do not care about the rest. Maybe even only scrape URLs from the ones that are in the previous tables
+
+For some MPs, Wikipedia only provides the birth year and not the date; their age are then given as a range of two years. Since these are not big age ranges and to make data analysis + visualisation easier, for these 2 MPs, we take the first, younger number given. Additionally, there is one MP for whom there is no birthdate information available on Wikipedia; the Age value for this MP is thus NA
+--> check for information on MPs themselves (age)
+    -> https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election
+    -> note some MPs have died during the term, for them age will then be NA since the fact that they died before completing the term means they did not have as much time to ask things as the others which may impact results - this is the case for 3 MPs
+    
+Need to change the webscraping to only MPs who are in the four main tables! given the RQ, we do not care about the rest. Maybe even only scrape URLs from the ones that are in the previous tables
+
+For some MPs, Wikipedia only provides the birth year and not the date; their age are then given as a range of two years. Since these are not big age ranges and to make data analysis + visualisation easier, for these 2 MPs, we take the first, younger number given. Additionally, there is one MP for whom there is no birthdate information available on Wikipedia; the Age value for this MP is thus NA
+    
+```{r, MP-ages}
+
+url <- "https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election"
+
+  # Extracting HTML:
+mp_table_html <- read_html(url) %>% html_nodes(xpath = '//*[@id="elected-mps"]')
+  
+  # Creating table:
+mp_table <- mp_table_html %>% html_table()
+
+#removing unnecessary columns and source row, improving column names:
+mp_table_cleaned <- mp_table[[1]] %>% 
+                    select(-`Party of incumbentbefore election`, -`Party of incumbentafter election`)
+mp_table_cleaned <- mp_table_cleaned %>%
+                    rename(MP = `Member returned`)
+mp_table_cleaned <- mp_table_cleaned[-651, ]
+
+mp_table_filtered <- mp_table_cleaned %>% 
+                  filter(MP %in% AskingMPs)
+
+# Adding URLs
+URL <- c()
+for (member in mp_table_filtered$MP) {
+  nodes <- mp_table_html %>% 
+    html_nodes(xpath = paste0('//a[text()="', member, '"]'))
+  link <- nodes[[1]] %>% html_attr("href")
+  URL <- c(URL, link)
+}
+URL <- paste0("https://en.wikipedia.org", URL)
+mp_table_filtered$URL <- URL
+
+# getting age from MPs that asked a written or oral question ONLY
+info_extraction <- function(df) {
+  # Setting up empty vectors for the elements of interest:
+  Age <- c()
+  for (URL in 1:nrow(df)) { 
+    info_labels <- c()
+    info_data <- c()
+    URL <- df$URL[URL] # iterating over MP page URLs
+    current_html <- read_html(URL)
+    # setting up access to content of infobox labels and data:
+    infoboxlabel_html <- current_html %>% html_nodes(".infobox-label")
+    infoboxdata_html <- current_html %>% html_nodes(".infobox-data")
+    labels <- infoboxlabel_html %>% html_text()
+    data <- infoboxdata_html %>% html_text()
+    info_labels <- c(labels)
+    info_data <- c(data)
+    # extracting age:
+    birthdate <- info_data[info_labels == "Born"]
+    current_age <- str_extract(birthdate, "age\\s(\\d+)(-\\d+)?")
+    if (length(current_age) > 0) {
+      current_age <- gsub("[^0-9-]", "", current_age)
+      if (grepl("-", current_age)) {
+      # If it's a range, take the middle value
+        range_values <- as.numeric(strsplit(current_age, "-")[[1]])
+        current_age <- mean(range_values)
+      } else {
+      # If not a range, convert to integer
+        current_age <- as.numeric(str_extract(current_age, "\\d+"))
+      }
+    } else {
+      current_age <- NA
+    }
+    Age <- c(Age, current_age)
+    Sys.sleep(2)
+  }
+  return(Age)
+}
+
+Age <- info_extraction(mp_table_filtered)
+mp_table_filtered$Age <- Age
+
+mp_table_filtered <- select(mp_table_filtered, -Notes)
+
+dbWriteTable(db, "MP_Ages", mp_table_filtered)
+```
+
+```{r}
+file_checker(db, "MP_Ages")
+```
+
+
+The MPs positions on the left-right scale was taken from the following dataset:
+    -> http://www.mpsleftright.co.uk
+    -> note that there is a confidence interval for all left/right values that is usually +- 10 points         above and below the value given in the table
+    -> do a scatterplot with facetwrap for frequency of economy and health/welfare questions
+    
+```{r MP-leftright}
+mp_leftright <- read_xlsx("data/mpsleftright_excel.xlsx", sheet = "MP values")
+
+# select only necessary columns:
+mp_leftright <- select(mp_leftright, Name, Constituency, PCON22CD, Party, Value, Rank)
+
+# ensure identical column names
+mp_leftright <- rename(mp_leftright, MP = Name, Constituency_ID = PCON22CD)
+
+capitalize_names <- function(name) {
+  words <- strsplit(tolower(name), " ")[[1]]
+  words <- sapply(words, function(word) {
+    paste(toupper(substring(word, 1, 1)), 
+          substring(word, 2), 
+          sep = "")
+  })
+  paste(words, collapse = " ")
+} #Turns a combination of first and last name into format with only the first letter each capitalised
+
+mp_leftright$MP <- sapply(mp_leftright$MP, capitalize_names)
+
+# only keep MPs who have asked relevant questions:
+mp_leftright_filtered <- mp_leftright %>%
+  filter(MP %in% AskingMPs)
+
+mp_leftright_filtered
+
+# Add filtered tibble to database
+dbWriteTable(db, "Left_Right_Scale", mp_leftright_filtered)
+
+```
+
+```{r}
+file_checker(db, "Left_Right_Scale")
+```
+
+
+The Constituency Median Wage was retrieved from a dataset by the House of Commons: https://commonslibrary.parliament.uk/constituency-data-wages/
+
+```{r constituency-income}
+constituency_wages <- read_xlsx("data/Wages.xlsx", sheet = "Data") # reading dataset on median wages in all constituencies into R
+
+constituency_wages <- select(constituency_wages, -CountryID, -CountryName, -DateOfThisUpdate, -DateOfDataset, -WageMedianCountry, -RegionID, -RegionName, -WageMedianRegion) # Selecting only necessary columns
+
+constituency_wages <- rename(constituency_wages, Constituency = 
+ConstituencyName, Constituency_ID = ONSConstID) # Consistent column names
+
+# only keep Constituencies whose MPs have asked relevant questions:
+constituency_filtered <- constituency_wages %>%
+  filter(Constituency %in% mp_leftright_filtered$Constituency)
+
+constituency_filtered
+
+dbWriteTable(db, "Constituency_Med_Wages", constituency_filtered)
+```
+
+```{r, eval=TRUE}
+file_checker(db, "Constituency_Med_Wages")
+```
+
+##Analysis
+
+
 
 
 ```{r disconnect-db}
