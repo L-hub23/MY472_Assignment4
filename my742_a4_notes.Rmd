@@ -1,0 +1,401 @@
+---
+title: "Final_Assignment_Notes"
+author: "Lea Schiller"
+date: "2023-12-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+RQ: What, if any, characteristics and factors discriminate MPs who tend to ask questions about economic issues from MPs who tend to ask questions about health and welfare issues?
+
+problem is that both topics are very broad and are often referenced in relation to other things. the only way to get questions definitively relating to these without using human coding is to only take questions for departments that are unmistakably related. even when using RegEx, there is no way to tell if the primary topic of the question is connected to these keywords or not
+
+Sampling Strategy: Department for Business and Trade was only established in Feb 2023, and its predecessors were also responsible for climate change, science and innovation which is not quite what we want to look at. So we will take all written and oral questions for the department for business and trade and the department of health and social care from 7th of February until now.
+
+Answering Body: 
+*17 = Department for Health and Social Care
+*214 = Department for Business and Trade
+
+
+```{r}
+
+# Questions have to be requested from the API in three steps since there is a maximum of 100 questions per request
+# Each request contains the maximum number of answering sessions with the department in question where the number of questions does not exceed 100
+# This was no question is counted twice and no question is left out
+
+health_qs_JSON_1 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-02-07&parameters.answeringDateEnd=2023-04-25&parameters.answeringBodyIds=17&parameters.take=100"
+
+health_qs_1 <- fromJSON(health_qs_JSON_1)
+rownames(health_qs_1) <- NULL
+health_tibble_1 <- as_tibble(health_qs_1$Response)
+
+health_qs_JSON_2 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-04-26&parameters.answeringDateEnd=2023-07-11&parameters.answeringBodyIds=17&parameters.take=100"
+
+# extract the response as a tibble without row names
+health_qs_2 <- fromJSON(health_qs_JSON_2)
+rownames(health_qs_2) <- NULL
+health_tibble_2 <- as_tibble(health_qs_2$Response)
+
+health_qs_JSON_3 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-07-12&parameters.answeringDateEnd=2023-10-17&parameters.answeringBodyIds=17&parameters.take=100"
+
+health_qs_3 <- fromJSON(health_qs_JSON_3)
+rownames(health_qs_3) <- NULL
+health_tibble_3 <- as_tibble(health_qs_3$Response)
+
+# Combine into one table
+oral_health_qs <- bind_rows(health_tibble_1, health_tibble_2, health_tibble_3)
+
+
+# repeat process for questions answered by Department for Business and Trade
+econ_qs_JSON_1 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-02-07&parameters.answeringDateEnd=2023-05-18&parameters.answeringBodyIds=214&parameters.take=100"
+
+econ_qs_1 <- fromJSON(econ_qs_JSON_1)
+rownames(econ_qs_1) <- NULL
+econ_tibble_1 <- as_tibble(econ_qs_1$Response)
+
+econ_qs_JSON_2 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-05-19&parameters.answeringDateEnd=2023-09-14&parameters.answeringBodyIds=214&parameters.take=100"
+
+# extract the response as a tibble without row names
+econ_qs_2 <- fromJSON(econ_qs_JSON_2)
+rownames(econ_qs_2) <- NULL
+econ_tibble_2 <- as_tibble(econ_qs_2$Response)
+
+econ_qs_JSON_3 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-09-15&&parameters.answeringBodyIds=214&parameters.take=100"
+
+econ_qs_3 <- fromJSON(econ_qs_JSON_3)
+rownames(econ_qs_3) <- NULL
+econ_tibble_3 <- as_tibble(econ_qs_3$Response)
+
+# Combine into one table
+oral_econ_qs <- bind_rows(econ_tibble_1, econ_tibble_2, econ_tibble_3)
+
+#Unpacking data frames with information about the asking MP:
+oral_health_qs <- oral_health_qs %>% 
+  unnest(AskingMember, names_sep = "_")
+oral_econ_qs <- oral_econ_qs %>% 
+  unnest(AskingMember, names_sep = "_")
+
+# Combining into one table
+oral_qs <- bind_rows(oral_health_qs, oral_econ_qs)
+
+#Getting rid of unnecessary columns; question topic can be discerned by answering body:
+oral_qs <- select(oral_qs, -Id, -Status, -Number, -TabledWhen, -RemovedFromToBeAskedWhen, -DeclarableInterestDetail, -HansardLink, -UIN, -AskingMember_MnisId, -AskingMember_PimsId, -AskingMember_ListAs, -AskingMember_PartyId, -AskingMember_PartyColour, -AskingMember_PhotoUrl, -AnsweringMinister, -AskingMemberId, -AnsweringMinisterId, -AnsweringMinisterTitle, -QuestionText, -QuestionType, -AskingMember_Status, -AnsweringWhen)
+
+oral_qs <- rename(oral_qs, MP = AskingMember_Name, Constituency = AskingMember_Constituency, Party = AskingMember_Party)
+
+oral_qs
+
+```
+There were more questions sampled for the Department for Business and Trade than for the Department for Health and Welfare. This is because the deadlines for answering Oral questions are in regular intervals, but differ in between departments. In order to be able to compare the volume of requests made to each department in the given time, the last deadline for answering oral questions for the Department for Health and Welfare within the specified sampling time was excluded from the analysis. Overall, there were 175 oral questions each sampled for the Department for Business and Trade and the Department for Health and Welfare.
+
+
+```{r}
+# Getting data on written questions
+health_written_JSON_1 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-03-01&answeredWhenTo=2023-03-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_1 <- fromJSON(health_written_JSON_1)
+
+health_written_1 <- as_tibble(health_written_1$results)
+
+health_written_1 <- health_written_1$value
+
+
+health_written_JSON_2 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-04-01&answeredWhenTo=2023-04-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_2 <- fromJSON(health_written_JSON_2)
+
+health_written_2 <- as_tibble(health_written_2$results)
+
+health_written_2 <- health_written_2$value
+
+health_written_JSON_3 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-06-01&answeredWhenTo=2023-06-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_3 <- fromJSON(health_written_JSON_3)
+
+health_written_3 <- as_tibble(health_written_3$results)
+
+health_written_3 <- health_written_3$value
+
+
+health_written_JSON_4 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-07-01&answeredWhenTo=2023-07-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_4 <- fromJSON(health_written_JSON_4)
+
+health_written_4 <- as_tibble(health_written_4$results)
+
+health_written_4 <- health_written_4$value
+
+
+health_written_JSON_5 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-10-01&answeredWhenTo=2023-10-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_5 <- fromJSON(health_written_JSON_5)
+
+health_written_5 <- as_tibble(health_written_5$results)
+
+health_written_5 <- health_written_5$value
+
+
+# combine tables:
+written_health_qs <- bind_rows(health_written_1, health_written_2, health_written_3, health_written_4, health_written_5)
+
+
+
+econ_written_JSON_1 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-03-01&answeredWhenTo=2023-03-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_1 <- fromJSON(econ_written_JSON_1)
+
+econ_written_1 <- as_tibble(econ_written_1$results)
+
+econ_written_1 <- econ_written_1$value
+
+
+econ_written_JSON_2 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-05-01&answeredWhenTo=2023-05-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_2 <- fromJSON(econ_written_JSON_2)
+
+econ_written_2 <- as_tibble(econ_written_2$results)
+
+econ_written_2 <- econ_written_2$value
+
+econ_written_JSON_3 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-06-01&answeredWhenTo=2023-06-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_3 <- fromJSON(econ_written_JSON_3)
+
+econ_written_3 <- as_tibble(econ_written_3$results)
+
+econ_written_3 <- econ_written_3$value
+
+
+econ_written_JSON_4 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-09-01&answeredWhenTo=2023-09-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_4 <- fromJSON(econ_written_JSON_4)
+
+econ_written_4 <- as_tibble(econ_written_4$results)
+
+econ_written_4 <- econ_written_4$value
+
+
+econ_written_JSON_5 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-11-01&answeredWhenTo=2023-11-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_5 <- fromJSON(econ_written_JSON_5)
+
+econ_written_5 <- as_tibble(econ_written_5$results)
+
+econ_written_5 <- econ_written_5$value
+
+
+# combine tables:
+written_econ_qs <- bind_rows(econ_written_1, econ_written_2, econ_written_3, econ_written_4, econ_written_5)
+
+#Unpacking data frames with information about the asking MP:
+written_health_qs <- written_health_qs %>% 
+  unnest(askingMember, names_sep = "_")
+written_econ_qs <- written_econ_qs %>% 
+  unnest(askingMember, names_sep = "_")
+
+written_qs <- bind_rows(written_health_qs, written_econ_qs)
+
+# Getting rid of unnecessary columns
+written_qs <- select(written_qs, -id, -askingMemberId, -askingMember_id, -askingMember_listAs, -askingMember_partyColour, -
+askingMember_partyAbbreviation, -
+askingMember_thumbnailUrl, -house, -memberHasInterest, -uin, -isWithdrawn, -isNamedDay, -groupedQuestions, -answerIsHolding, -answerIsCorrection, -answeringMemberId, -answeringMember, -correctingMemberId, -correctingMember, -answerText, -originalAnswerText, -comparableAnswerText, -dateAnswerCorrected, -dateHoldingAnswer, -attachmentCount, -heading, - attachments, -groupedQuestionsDates, -	
+dateTabled, -dateForAnswer, -	
+questionText, -dateAnswered)
+
+written_qs <- rename(written_qs, MP = 
+askingMember_name, Constituency = askingMember_memberFrom, Party = askingMember_party, AnsweringBodyId = answeringBodyId, AnsweringBody = 	
+answeringBodyName)
+
+```
+Since written questions are answered during all working days (?) and not just on specific days every few weeks, there are a lot more written than oral questions in the time frame selected. To ensure comparability between frequency of oral and written questions and to avoid unnecessary data retrieval, 175 questions will be sampled from the time frame specified instead of taking all written questions that were asked during this time. 
+
+I have used a stratified sampling approach that is adjusted to the times of the oral question sessions. Each topic area had five oral questions sessions resulting in 175 questions answered in total (API only works with questions answered when?). Thus, I will sample 35 questions each for the 5 months in which they had oral answering sessions.
+
+(By default, when specifying a time frame for written questions, the API gives the last 35 questions????)
+
+```{r}
+# Add indicator if question was written or oral
+oral_qs <- oral_qs %>%
+  mutate(QuestionType = "Oral")
+written_qs <- written_qs %>%
+  mutate(QuestionType = "Written")
+
+#Combine written and oral question tables into one
+oral_written_qs <- bind_rows(oral_qs, written_qs)
+
+# Get vector with names of asking MPs
+AskingMPs <- unique(oral_written_qs$MP)
+# Removing titles
+AskingMPs <- gsub("Dr\ |Mr\ |Ms\ |Mrs\ |Dame\ |Sir\ ", "", AskingMPs)
+
+AskingMPs
+```
+
+
+
+--> info on MPs needs to be gathered separately
+"http://data.parliament.uk/membersdataplatform/services/mnis/members/query/house=Commons/" (API doesn't give constituency info)
+
+--> generate map for constituency income information
+
+```{r}
+constituency_income <- read_xlsx("data/Wages.xlsx", sheet = "Data") # reading dataset on median wages in all constituencies into R
+
+constituency_income <- select(constituency_income, -CountryID, -CountryName, -DateOfThisUpdate, -DateOfDataset, -WageMedianCountry, -RegionID, -RegionName, -WageMedianRegion) # Selecting only necessary columns
+
+constituency_income <- rename(constituency_income, Constituency = 
+ConstituencyName, Constituency_ID = ONSConstID) # Consistent column names
+```
+
+
+```{r}
+# getting the shapefile for hexagon of UK constituencies
+west_hex_map
+
+# merging shapefile with income tibble: 
+constituencies_income_sf <- merge(west_hex_map, constituency_income, by.x = "gss_code", by.y = "ONSConstID")
+
+head(constituencies_income_sf)
+
+#making maps
+install.packages("tmap")
+install.packages("sf")
+library("tmap")
+library("sf")
+
+# making map showing median income of constituencies
+tm_shape(constituencies_income_sf) +
+  tm_borders() +
+  tm_fill(col = "WageMedianConst", 
+          palette = "Blues", 
+          title = "Median Wage",
+          style = "quantile", 
+          n = 5) +
+  tm_layout(frame = FALSE, 
+            title = "Median Wage of UK Constituencies", 
+            legend.position = c("right", "bottom"),
+            legend.text.size = 0.5,
+            legend.title.size = 0.6,
+            title.size = 1,
+            outer.margins = c(0.02, 0.02, 0.1, 0.02))
+```
+
+
+--> generate plot for MP left-right scale (need to find data for left-right scale of MPs)
+    -> http://www.mpsleftright.co.uk
+    -> note that there is a confidence interval for all left/right values that is usually +- 10 points         above and below the value given in the table
+    -> do a scatterplot with facetwrap for frequency of economy and health/welfare questions
+```{r}
+mp_leftright <- read_xlsx("data/mpsleftright_excel.xlsx", sheet = "MP values")
+
+# select only necessary columns:
+mp_leftright <- select(mp_leftright, Name, Constituency, PCON22CD, Party, Value, Rank)
+
+mp_leftright <- rename(mp_leftright, MP = Name, Constituency_ID = PCON22CD)
+
+capitalize_names <- function(name) {
+  words <- strsplit(tolower(name), " ")[[1]]
+  words <- sapply(words, function(word) {
+    paste(toupper(substring(word, 1, 1)), 
+          substring(word, 2), 
+          sep = "")
+  })
+  paste(words, collapse = " ")
+}
+
+mp_leftright$MP <- sapply(mp_leftright$MP, capitalize_names)
+```
+
+
+--> check for information on MPs themselves (age)
+    -> https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election
+    -> note some MPs have died during the term, for them age will then be NA since the fact that they died before completing the term means they did not have as much time to ask things as the others which may impact results - this is the case for 3 MPs
+    
+Need to change the webscraping to only MPs who are in the four main tables! given the RQ, we do not care about the rest. Maybe even only scrape URLs from the ones that are in the previous tables
+
+For some MPs, Wikipedia only provides the birth year and not the date; their age are then given as a range of two years. Since these are not big age ranges and to make data analysis + visualisation easier, for these 2 MPs, we take the first, younger number given. Additionally, there is one MP for whom there is no birthdate information available on Wikipedia; the Age value for this MP is thus NA
+    
+```{r}
+library("xml2")
+library("rvest")
+
+url <- "https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election"
+
+  # Extracting HTML:
+mp_table_html <- read_html(url) %>% html_nodes(xpath = '//*[@id="elected-mps"]')
+  
+  # Creating table:
+mp_table <- mp_table_html %>% html_table()
+
+#removing unnecessary columns and source row, improving column names:
+mp_table_cleaned <- mp_table[[1]] %>% 
+                    select(-`Party of incumbentbefore election`, -`Party of incumbentafter election`)
+mp_table_cleaned <- mp_table_cleaned %>%
+                    rename(MP = `Member returned`)
+mp_table_cleaned <- mp_table_cleaned[-651, ]
+
+mp_table_filtered <- mp_table_cleaned %>% 
+                  filter(MP %in% AskingMPs)
+
+# Adding URLs
+URL <- c()
+for (member in mp_table_filtered$MP) {
+  nodes <- mp_table_html %>% 
+    html_nodes(xpath = paste0('//a[text()="', member, '"]'))
+  link <- nodes[[1]] %>% html_attr("href")
+  URL <- c(URL, link)
+}
+URL <- paste0("https://en.wikipedia.org", URL)
+mp_table_filtered$URL <- URL
+
+# getting age from MPs that asked a written or oral question ONLY
+info_extraction <- function(df) {
+  # Setting up empty vectors for the elements of interest:
+  Age <- c()
+  for (URL in 1:nrow(df)) { 
+    info_labels <- c()
+    info_data <- c()
+    URL <- df$URL[URL] # iterating over MP page URLs
+    current_html <- read_html(URL)
+    # setting up access to content of infobox labels and data:
+    infoboxlabel_html <- current_html %>% html_nodes(".infobox-label")
+    infoboxdata_html <- current_html %>% html_nodes(".infobox-data")
+    labels <- infoboxlabel_html %>% html_text()
+    data <- infoboxdata_html %>% html_text()
+    info_labels <- c(labels)
+    info_data <- c(data)
+    # extracting age:
+    birthdate <- info_data[info_labels == "Born"]
+    current_age <- str_extract(birthdate, "age\\s(\\d+)(-\\d+)?")
+    if (length(current_age) > 0) {
+      current_age <- gsub("[^0-9-]", "", current_age)
+      if (grepl("-", current_age)) {
+      # If it's a range, take the middle value
+        range_values <- as.numeric(strsplit(current_age, "-")[[1]])
+        current_age <- mean(range_values)
+      } else {
+      # If not a range, convert to integer
+        current_age <- as.numeric(str_extract(current_age, "\\d+"))
+      }
+    } else {
+      current_age <- NA
+    }
+    Age <- c(Age, current_age)
+    Sys.sleep(2)
+  }
+  return(Age)
+}
+
+Age <- info_extraction(mp_table_filtered)
+mp_table_filtered$Age <- Age
+
+mp_table_filtered
+
+#MPs with age ranges are still NA!
+```
+
+
+
