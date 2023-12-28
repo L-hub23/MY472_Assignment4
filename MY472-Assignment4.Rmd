@@ -1,0 +1,302 @@
+---
+title: "A4_Data_Collection"
+output: html_document
+date: "2023-12-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load-packages}
+library("httr")
+library("jsonlite")
+library("tidyverse")
+library("tibble")
+library("readxl")
+library("parlitools")
+library("xml2")
+library("rvest")
+library("DBI")
+library("RSQLite")
+```
+
+##Introduction
+
+Research Question: What, if any, characteristics and factors discriminate MPs who tend to ask questions about economic issues from MPs who tend to ask questions about health and welfare issues?
+
+Both topics are very broad and are often referenced in relation to other things. The only way to get questions definitively relating to these is to only take questions for departments that are unmistakably related, as even when using RegEx to analyse question content, there is no way to tell if the primary topic of the question is connected to these keywords or not. Additionally, the purpose of this project is not to count the total number of questions relating to these topics but to check the difference in asking MP characteristics. Thus, restricting to only questions for these two Departments does not threaten the validity of the research design.
+
+##Data
+
+Sampling Strategy: The Department for Business and Trade was only established in February 2023, and its predecessors were also responsible for climate change, science and innovation which is not quite what the research aims to analyse. So questions will be sampled between February 2023 and December 2023. Oral questions are only answered every few weeks, which means there are less questions available for analysis. Thus, all oral questions were sampled (in total 175 for each topic) and a 175 written questions were sampled, 35 for each month that oral question time also took place.
+
+The answering bodies are coded with numbers in the UK Parliament API. 17 stands for the Department for Health and Social Care and 214 for the Department for Business and Trade.
+
+There were more oral questions sampled for the Department for Business and Trade than for the Department for Health and Welfare. This is because the deadlines for answering Oral questions are in regular intervals, but differ in between departments. In order to be able to compare the volume of requests made to each department in the given time, the last deadline for answering oral questions for the Department for Health and Welfare within the specified sampling time was excluded from the analysis. Overall, there were 175 oral questions each sampled for the Department for Business and Trade and the Department for Health and Welfare.
+
+```{r oral-questions}
+
+# Questions have to be requested from the API in three steps since there is a maximum of 100 questions per request
+# Each request contains the maximum number of answering sessions with the department in question where the number of questions does not exceed 100
+# This was done so no question is counted twice and no question is left out
+
+health_qs_JSON_1 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-02-07&parameters.answeringDateEnd=2023-04-25&parameters.answeringBodyIds=17&parameters.take=100"
+
+health_qs_1 <- fromJSON(health_qs_JSON_1)
+rownames(health_qs_1) <- NULL
+health_tibble_1 <- as_tibble(health_qs_1$Response)
+
+health_qs_JSON_2 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-04-26&parameters.answeringDateEnd=2023-07-11&parameters.answeringBodyIds=17&parameters.take=100"
+
+# extract the response as a tibble without row names
+health_qs_2 <- fromJSON(health_qs_JSON_2)
+rownames(health_qs_2) <- NULL
+health_tibble_2 <- as_tibble(health_qs_2$Response)
+
+health_qs_JSON_3 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-07-12&parameters.answeringDateEnd=2023-10-17&parameters.answeringBodyIds=17&parameters.take=100"
+
+health_qs_3 <- fromJSON(health_qs_JSON_3)
+rownames(health_qs_3) <- NULL
+health_tibble_3 <- as_tibble(health_qs_3$Response)
+
+# Combine into one table
+oral_health_qs <- bind_rows(health_tibble_1, health_tibble_2, health_tibble_3)
+
+
+# repeat process for questions answered by Department for Business and Trade
+econ_qs_JSON_1 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-02-07&parameters.answeringDateEnd=2023-05-18&parameters.answeringBodyIds=214&parameters.take=100"
+
+econ_qs_1 <- fromJSON(econ_qs_JSON_1)
+rownames(econ_qs_1) <- NULL
+econ_tibble_1 <- as_tibble(econ_qs_1$Response)
+
+econ_qs_JSON_2 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-05-19&parameters.answeringDateEnd=2023-09-14&parameters.answeringBodyIds=214&parameters.take=100"
+
+# extract the response as a tibble without row names
+econ_qs_2 <- fromJSON(econ_qs_JSON_2)
+rownames(econ_qs_2) <- NULL
+econ_tibble_2 <- as_tibble(econ_qs_2$Response)
+
+econ_qs_JSON_3 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-09-15&&parameters.answeringBodyIds=214&parameters.take=100"
+
+econ_qs_3 <- fromJSON(econ_qs_JSON_3)
+rownames(econ_qs_3) <- NULL
+econ_tibble_3 <- as_tibble(econ_qs_3$Response)
+
+# Combine into one table
+oral_econ_qs <- bind_rows(econ_tibble_1, econ_tibble_2, econ_tibble_3)
+
+#Unpacking data frames with information about the asking MP:
+oral_health_qs <- oral_health_qs %>% 
+  unnest(AskingMember, names_sep = "_")
+oral_econ_qs <- oral_econ_qs %>% 
+  unnest(AskingMember, names_sep = "_")
+
+# Combining health and economy questions into one table
+oral_qs <- bind_rows(oral_health_qs, oral_econ_qs)
+
+#Getting rid of unnecessary columns; question topic can be discerned by answering body:
+oral_qs <- select(oral_qs, -Id, -Status, -Number, -TabledWhen, -RemovedFromToBeAskedWhen, -DeclarableInterestDetail, -HansardLink, -UIN, -AskingMember_MnisId, -AskingMember_PimsId, -AskingMember_ListAs, -AskingMember_PartyId, -AskingMember_PartyColour, -AskingMember_PhotoUrl, -AnsweringMinister, -AskingMemberId, -AnsweringMinisterId, -AnsweringMinisterTitle, -QuestionText, -QuestionType, -AskingMember_Status, -AnsweringWhen)
+
+oral_qs <- rename(oral_qs, MP = AskingMember_Name, Constituency = AskingMember_Constituency, Party = AskingMember_Party)
+
+oral_qs
+
+```
+Since written questions are answered during all working days (?) and not just on specific days every few weeks, there are a lot more written than oral questions in the time frame selected. To ensure comparability between frequency of oral and written questions and to avoid unnecessary data retrieval, 175 questions will be sampled from the time frame specified instead of taking all written questions that were asked during this time. 
+
+I have used a stratified sampling approach that is adjusted to the times of the oral question sessions. Each topic area had five oral questions sessions resulting in 175 questions answered in total (API only works with questions answered when?). Thus, I will sample 35 questions each for the 5 months in which they had oral answering sessions.
+
+(By default, when specifying a time frame for written questions, the API gives the last 35 questions????)
+
+```{r written-questions}
+# Getting data on written questions
+health_written_JSON_1 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-03-01&answeredWhenTo=2023-03-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_1 <- fromJSON(health_written_JSON_1)
+
+health_written_1 <- as_tibble(health_written_1$results)
+
+health_written_1 <- health_written_1$value
+
+
+health_written_JSON_2 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-04-01&answeredWhenTo=2023-04-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_2 <- fromJSON(health_written_JSON_2)
+
+health_written_2 <- as_tibble(health_written_2$results)
+
+health_written_2 <- health_written_2$value
+
+health_written_JSON_3 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-06-01&answeredWhenTo=2023-06-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_3 <- fromJSON(health_written_JSON_3)
+
+health_written_3 <- as_tibble(health_written_3$results)
+
+health_written_3 <- health_written_3$value
+
+
+health_written_JSON_4 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-07-01&answeredWhenTo=2023-07-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_4 <- fromJSON(health_written_JSON_4)
+
+health_written_4 <- as_tibble(health_written_4$results)
+
+health_written_4 <- health_written_4$value
+
+
+health_written_JSON_5 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-10-01&answeredWhenTo=2023-10-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
+
+health_written_5 <- fromJSON(health_written_JSON_5)
+
+health_written_5 <- as_tibble(health_written_5$results)
+
+health_written_5 <- health_written_5$value
+
+
+# combine tables:
+written_health_qs <- bind_rows(health_written_1, health_written_2, health_written_3, health_written_4, health_written_5)
+
+
+
+econ_written_JSON_1 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-03-01&answeredWhenTo=2023-03-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_1 <- fromJSON(econ_written_JSON_1)
+
+econ_written_1 <- as_tibble(econ_written_1$results)
+
+econ_written_1 <- econ_written_1$value
+
+
+econ_written_JSON_2 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-05-01&answeredWhenTo=2023-05-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_2 <- fromJSON(econ_written_JSON_2)
+
+econ_written_2 <- as_tibble(econ_written_2$results)
+
+econ_written_2 <- econ_written_2$value
+
+econ_written_JSON_3 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-06-01&answeredWhenTo=2023-06-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_3 <- fromJSON(econ_written_JSON_3)
+
+econ_written_3 <- as_tibble(econ_written_3$results)
+
+econ_written_3 <- econ_written_3$value
+
+
+econ_written_JSON_4 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-09-01&answeredWhenTo=2023-09-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_4 <- fromJSON(econ_written_JSON_4)
+
+econ_written_4 <- as_tibble(econ_written_4$results)
+
+econ_written_4 <- econ_written_4$value
+
+
+econ_written_JSON_5 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-11-01&answeredWhenTo=2023-11-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
+
+econ_written_5 <- fromJSON(econ_written_JSON_5)
+
+econ_written_5 <- as_tibble(econ_written_5$results)
+
+econ_written_5 <- econ_written_5$value
+
+
+# combine tables:
+written_econ_qs <- bind_rows(econ_written_1, econ_written_2, econ_written_3, econ_written_4, econ_written_5)
+
+#Unpacking data frames with information about the asking MP:
+written_health_qs <- written_health_qs %>% 
+  unnest(askingMember, names_sep = "_")
+written_econ_qs <- written_econ_qs %>% 
+  unnest(askingMember, names_sep = "_")
+
+written_qs <- bind_rows(written_health_qs, written_econ_qs)
+
+# Getting rid of unnecessary columns
+written_qs <- select(written_qs, -id, -askingMemberId, -askingMember_id, -askingMember_listAs, -askingMember_partyColour, -
+askingMember_partyAbbreviation, -
+askingMember_thumbnailUrl, -house, -memberHasInterest, -uin, -isWithdrawn, -isNamedDay, -groupedQuestions, -answerIsHolding, -answerIsCorrection, -answeringMemberId, -answeringMember, -correctingMemberId, -correctingMember, -answerText, -originalAnswerText, -comparableAnswerText, -dateAnswerCorrected, -dateHoldingAnswer, -attachmentCount, -heading, - attachments, -groupedQuestionsDates, -	
+dateTabled, -dateForAnswer, -	
+questionText, -dateAnswered)
+
+written_qs <- rename(written_qs, MP = 
+askingMember_name, Constituency = askingMember_memberFrom, Party = askingMember_party, AnsweringBodyId = answeringBodyId, AnsweringBody = 	
+answeringBodyName)
+```
+
+Finally, written and oral questions were combined into one table with an added column indicating whether the question type was written or oral. (Additionally, I extracted the unique names of the asking MPs for the purpose of further data collection.) 
+
+```{r combine-questions-table}
+# Add indicator if question was written or oral
+oral_qs <- oral_qs %>%
+  mutate(QuestionType = "Oral")
+written_qs <- written_qs %>%
+  mutate(QuestionType = "Written")
+
+#Combine written and oral question tables into one
+oral_written_qs <- bind_rows(oral_qs, written_qs)
+
+# Get vector with names of asking MPs
+AskingMPs <- unique(oral_written_qs$MP)
+# Removing titles
+AskingMPs <- gsub("Dr\ |Mr\ |Ms\ |Mrs\ |Dame\ |Sir\ ", "", AskingMPs)
+```
+
+```{r, eval=FALSE}
+db <- dbConnect(RSQLite::SQLite(), dbname = "database/ParliamentQuestions.sqlite")
+dbWriteTable(db, "All_Questions", oral_written_qs)
+```
+
+```{r, eval=TRUE}
+# define function to check status of file
+file_checker <- function(db_name, table_name) {
+  
+  result <- dbGetQuery(db_name, "SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
+
+  presence <- length(result) # define indicator for presence of file
+  
+  if (presence == 1) {
+    
+    print("The table is in the database.")
+    
+    #count number of rows
+    query <- glue::glue("SELECT COUNT(*) FROM {table_name}")
+    
+    n_of_rows <- dbGetQuery(db_name, query)
+  
+    n_of_rows <- as.vector(n_of_rows$`COUNT(*)`)
+  
+    # get a subset with just one row
+    query <- glue::glue("SELECT * FROM {table_name} LIMIT 1")
+    
+    test_df <- dbGetQuery(db_name, query)
+  
+    n_of_cols <- ncol(test_df) # count number of columns
+  
+    query <- glue::glue("{table_name}")
+    
+    all_field_names <- dbListFields(db_name, query)
+  
+    cat("The number of rows is ", n_of_rows, ". The number of columns is ", n_of_cols, ". The column names are: ", 
+        paste(all_field_names, collapse = ", "), ".", sep = "")
+    
+  } else {
+    print("The table is not in the database.")
+  }
+}
+```
+
+
+```{r, eval=TRUE, echo=TRUE}
+file_checker(db, "All_Questions")
+```
+
+
+```{r disconnect-db}
+dbDisconnect(db) #finally, disconnect from the database
+```
+
