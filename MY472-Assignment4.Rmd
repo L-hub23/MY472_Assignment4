@@ -1,14 +1,14 @@
 ---
-title: "A4_Data_Collection"
+title: "MY472 Final Assignment"
 output: html_document
 date: "2023-12-28"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = FALSE)
 ```
 
-```{r load-packages}
+```{r load-packages, include=FALSE}
 library("httr")
 library("jsonlite")
 library("tidyverse")
@@ -19,6 +19,8 @@ library("xml2")
 library("rvest")
 library("DBI")
 library("RSQLite")
+library("tmap")
+library("sf")
 ```
 
 ##Introduction
@@ -35,21 +37,23 @@ The answering bodies are coded with numbers in the UK Parliament API. 17 stands 
 
 There were more oral questions sampled for the Department for Business and Trade than for the Department for Health and Welfare. This is because the deadlines for answering Oral questions are in regular intervals, but differ in between departments. In order to be able to compare the volume of requests made to each department in the given time, the last deadline for answering oral questions for the Department for Health and Welfare within the specified sampling time was excluded from the analysis. Overall, there were 175 oral questions each sampled for the Department for Business and Trade and the Department for Health and Welfare.
 
-```{r oral-questions}
+```{r oral-questions, eval=FALSE}
 
 # Questions have to be requested from the API in three steps since there is a maximum of 100 questions per request
 # Each request contains the maximum number of answering sessions with the department in question where the number of questions does not exceed 100
 # This was done so no question is counted twice and no question is left out
 
+# get first JSON at start of time frame of interest, only questions answered by Department of Health and Welfare
 health_qs_JSON_1 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-02-07&parameters.answeringDateEnd=2023-04-25&parameters.answeringBodyIds=17&parameters.take=100"
 
+# extract the response as a tibble without row names
 health_qs_1 <- fromJSON(health_qs_JSON_1)
 rownames(health_qs_1) <- NULL
 health_tibble_1 <- as_tibble(health_qs_1$Response)
 
+#repeat process for the rest of the answering sessions in the time frame of interest:
 health_qs_JSON_2 <- "https://oralquestionsandmotions-api.parliament.uk/oralquestions/list?parameters.answeringDateStart=2023-04-26&parameters.answeringDateEnd=2023-07-11&parameters.answeringBodyIds=17&parameters.take=100"
 
-# extract the response as a tibble without row names
 health_qs_2 <- fromJSON(health_qs_JSON_2)
 rownames(health_qs_2) <- NULL
 health_tibble_2 <- as_tibble(health_qs_2$Response)
@@ -100,9 +104,6 @@ oral_qs <- bind_rows(oral_health_qs, oral_econ_qs)
 oral_qs <- select(oral_qs, -Id, -Status, -Number, -TabledWhen, -RemovedFromToBeAskedWhen, -DeclarableInterestDetail, -HansardLink, -UIN, -AskingMember_MnisId, -AskingMember_PimsId, -AskingMember_ListAs, -AskingMember_PartyId, -AskingMember_PartyColour, -AskingMember_PhotoUrl, -AnsweringMinister, -AskingMemberId, -AnsweringMinisterId, -AnsweringMinisterTitle, -QuestionText, -QuestionType, -AskingMember_Status, -AnsweringWhen)
 
 oral_qs <- rename(oral_qs, MP = AskingMember_Name, Constituency = AskingMember_Constituency, Party = AskingMember_Party)
-
-oral_qs
-
 ```
 Since written questions are answered during all working days (?) and not just on specific days every few weeks, there are a lot more written than oral questions in the time frame selected. To ensure comparability between frequency of oral and written questions and to avoid unnecessary data retrieval, 175 questions will be sampled from the time frame specified instead of taking all written questions that were asked during this time. 
 
@@ -110,17 +111,15 @@ I have used a stratified sampling approach that is adjusted to the times of the 
 
 (By default, when specifying a time frame for written questions, the API gives the last 35 questions????)
 
-```{r written-questions}
+```{r written-questions, eval=FALSE}
 # Getting data on written questions
 health_written_JSON_1 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-03-01&answeredWhenTo=2023-03-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
 
 health_written_1 <- fromJSON(health_written_JSON_1)
-
 health_written_1 <- as_tibble(health_written_1$results)
-
 health_written_1 <- health_written_1$value
 
-
+# repeat process for all months the Department of Health and Welfare has oral answering sessions
 health_written_JSON_2 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-04-01&answeredWhenTo=2023-04-30&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=17&house=Commons&take=35"
 
 health_written_2 <- fromJSON(health_written_JSON_2)
@@ -160,7 +159,7 @@ health_written_5 <- health_written_5$value
 written_health_qs <- bind_rows(health_written_1, health_written_2, health_written_3, health_written_4, health_written_5)
 
 
-
+# repeat process for questions for department of business and trade
 econ_written_JSON_1 <- "https://questions-statements-api.parliament.uk/api/writtenquestions/questions?answeredWhenFrom=2023-03-01&answeredWhenTo=2023-03-31&questionStatus=AllQuestions&includeWithdrawn=true&expandMember=true&answeringBodies=214&house=Commons&take=35"
 
 econ_written_1 <- fromJSON(econ_written_JSON_1)
@@ -214,6 +213,7 @@ written_health_qs <- written_health_qs %>%
 written_econ_qs <- written_econ_qs %>% 
   unnest(askingMember, names_sep = "_")
 
+#combine tables for both topics into one table
 written_qs <- bind_rows(written_health_qs, written_econ_qs)
 
 # Getting rid of unnecessary columns
@@ -225,12 +225,12 @@ questionText, -dateAnswered)
 
 written_qs <- rename(written_qs, MP = 
 askingMember_name, Constituency = askingMember_memberFrom, Party = askingMember_party, AnsweringBodyId = answeringBodyId, AnsweringBody = 	
-answeringBodyName)
+answeringBodyName) #ensure uniform column names
 ```
 
 Finally, written and oral questions were combined into one table with an added column indicating whether the question type was written or oral. (Additionally, I extracted the unique names of the asking MPs for the purpose of further data collection.) 
 
-```{r combine-questions-table}
+```{r combine-questions-table, eval = FALSE}
 # Add indicator if question was written or oral
 oral_qs <- oral_qs %>%
   mutate(QuestionType = "Oral")
@@ -243,57 +243,18 @@ oral_written_qs <- bind_rows(oral_qs, written_qs)
 # removing titles to ensure uniformity of name formats
 oral_written_qs$MP <- gsub("Dr\ |Mr\ |Ms\ |Mrs\ |Dame\ |Sir\ ", "", oral_written_qs$MP)
 
-# Get vector with names of asking MPs
+# Get vector with names of asking MPs and their constituencies
 AskingMPs <- unique(oral_written_qs$MP)
+RelevantConstituencies <- unique(oral_written_qs$Constituency)
 ```
+
+```{r establish connection, eval=TRUE}
+db <- dbConnect(RSQLite::SQLite(), dbname = "database/ParliamentQuestions.sqlite")
+```
+
 
 ```{r, eval=FALSE}
-db <- dbConnect(RSQLite::SQLite(), dbname = "database/ParliamentQuestions.sqlite")
 dbWriteTable(db, "All_Questions", oral_written_qs)
-```
-
-```{r, eval=TRUE}
-# define function to check status of file
-file_checker <- function(db_name, table_name) {
-  
-  result <- dbGetQuery(db_name, "SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'")
-
-  presence <- length(result) # define indicator for presence of file
-  
-  if (presence == 1) {
-    
-    print("The table is in the database.")
-    
-    #count number of rows
-    query <- glue::glue("SELECT COUNT(*) FROM {table_name}")
-    
-    n_of_rows <- dbGetQuery(db_name, query)
-  
-    n_of_rows <- as.vector(n_of_rows$`COUNT(*)`)
-  
-    # get a subset with just one row
-    query <- glue::glue("SELECT * FROM {table_name} LIMIT 1")
-    
-    test_df <- dbGetQuery(db_name, query)
-  
-    n_of_cols <- ncol(test_df) # count number of columns
-  
-    query <- glue::glue("{table_name}")
-    
-    all_field_names <- dbListFields(db_name, query)
-  
-    cat("The number of rows is ", n_of_rows, ". The number of columns is ", n_of_cols, ". The column names are: ", 
-        paste(all_field_names, collapse = ", "), ".", sep = "")
-    
-  } else {
-    print("The table is not in the database.")
-  }
-}
-```
-
-
-```{r, eval=TRUE, echo=TRUE}
-file_checker(db, "All_Questions")
 ```
 
 To analyze MP characteristics, additional data is necessary. This research will look at MP's party, age, their position on the political left-right scale and their constituency's median wage. 
@@ -311,10 +272,11 @@ For some MPs, Wikipedia only provides the birth year and not the date; their age
     
 Need to change the webscraping to only MPs who are in the four main tables! given the RQ, we do not care about the rest. Maybe even only scrape URLs from the ones that are in the previous tables
 
-For some MPs, Wikipedia only provides the birth year and not the date; their age are then given as a range of two years. Since these are not big age ranges and to make data analysis + visualisation easier, for these 2 MPs, we take the first, younger number given. Additionally, there is one MP for whom there is no birthdate information available on Wikipedia; the Age value for this MP is thus NA
-    
-```{r, MP-ages}
+For some MPs, Wikipedia only provides the birth year and not the date; their age are then given as a range of two years. Since these are not big age ranges and to make data analysis + visualisation easier, for these 2 MPs, we take the first, younger number given. Additionally, there is one MP for whom there is no birthdate information available on Wikipedia; the Age value for this MP is thus NA.
 
+Also, 31 MPs were not captured by this method. A majority, 22, of these MPs are from the Labour Party. For 20, this is because they were elected in a by-elections during the term, most commonly due to death or resignation of the incumbent MP. These MPs are therefore not included in the main table on Wikipedia from which the data was taken. The last 11 have different spellings of their names, which means matching was not possible.
+    
+```{r MP-ages, eval = FALSE}
 url <- "https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election"
 
   # Extracting HTML:
@@ -330,8 +292,11 @@ mp_table_cleaned <- mp_table_cleaned %>%
                     rename(MP = `Member returned`)
 mp_table_cleaned <- mp_table_cleaned[-651, ]
 
-mp_table_filtered <- mp_table_cleaned %>% 
+mp_table_filtered <- mp_table_cleaned %>% #filtering for only relevant MPs
                   filter(MP %in% AskingMPs)
+
+missing_mps <- oral_written_qs$MP %>% #filtering for missing MPs
+                  filter(!MP %in% mp_table_filtered$MP)
 
 # Adding URLs
 URL <- c()
@@ -390,17 +355,14 @@ mp_table_filtered <- select(mp_table_filtered, -Notes)
 dbWriteTable(db, "MP_Ages", mp_table_filtered)
 ```
 
-```{r}
-file_checker(db, "MP_Ages")
-```
-
 
 The MPs positions on the left-right scale was taken from the following dataset:
     -> http://www.mpsleftright.co.uk
-    -> note that there is a confidence interval for all left/right values that is usually +- 10 points         above and below the value given in the table
+    -> note that there is a confidence interval for all left/right values that is usually +- 10 points above and below the value given in the table
     -> do a scatterplot with facetwrap for frequency of economy and health/welfare questions
+    note that this dataset does not include all MPs; 42 are missing. Thus, in the final data analysis, not all of the asking MPs can be considered. 
     
-```{r MP-leftright}
+```{r MP-leftright, eval = FALSE}
 mp_leftright <- read_xlsx("data/mpsleftright_excel.xlsx", sheet = "MP values")
 
 # select only necessary columns:
@@ -425,47 +387,303 @@ mp_leftright$MP <- sapply(mp_leftright$MP, capitalize_names)
 mp_leftright_filtered <- mp_leftright %>%
   filter(MP %in% AskingMPs)
 
-mp_leftright_filtered
-
 # Add filtered tibble to database
 dbWriteTable(db, "Left_Right_Scale", mp_leftright_filtered)
 
 ```
 
-```{r}
-file_checker(db, "Left_Right_Scale")
-```
-
 
 The Constituency Median Wage was retrieved from a dataset by the House of Commons: https://commonslibrary.parliament.uk/constituency-data-wages/
 
-```{r constituency-income}
+Estimates are for April 2023 and are for employee jobs only.
+
+Figures are subject to some uncertainty, as they come from a survey which only includes a limited number of people in each local area
+
+One constituency is missing: Weston-super-Mare, whose MP asked two oral questions to the Department of Health and Social Care and three oral questions to the Department for Business and Trade.
+
+```{r constituency-wages, eval = TRUE}
 constituency_wages <- read_xlsx("data/Wages.xlsx", sheet = "Data") # reading dataset on median wages in all constituencies into R
 
 constituency_wages <- select(constituency_wages, -CountryID, -CountryName, -DateOfThisUpdate, -DateOfDataset, -WageMedianCountry, -RegionID, -RegionName, -WageMedianRegion) # Selecting only necessary columns
 
 constituency_wages <- rename(constituency_wages, Constituency = 
 ConstituencyName, Constituency_ID = ONSConstID) # Consistent column names
+```
+
+
+```{r constituency-wages-filtering, eval = FALSE}
+missingConstituency <- oral_written_qs %>% # Checking for missing data
+  filter(!Constituency %in% constituency_wages$Constituency)
 
 # only keep Constituencies whose MPs have asked relevant questions:
 constituency_filtered <- constituency_wages %>%
-  filter(Constituency %in% mp_leftright_filtered$Constituency)
-
-constituency_filtered
+  filter(Constituency %in% RelevantConstituencies)
 
 dbWriteTable(db, "Constituency_Med_Wages", constituency_filtered)
 ```
 
-```{r, eval=TRUE}
-file_checker(db, "Constituency_Med_Wages")
-```
+Due to missing data from the MP Left-Right Scale as well as MP Age tables, not all asking MPs can be analysed. To ensure comparability of results, only MPs for whom both factors are available were considered during the analysis. In total, oral and written questions from a total of 211 MPs in a 9 month period were analysed.
+
 
 ##Analysis
+```{r SQL, eval = TRUE}
+age_alignment_table <- dbGetQuery(db, "SELECT 
+    q.MP,
+    q.Party,
+    q.Constituency,
+    q.Health_Questions,
+    q.Econ_Questions,
+    d.Age,
+    d.Value AS Left_Right_Value
+FROM 
+    (SELECT 
+        MP,
+        Party,
+        Constituency,
+        COUNT(CASE WHEN AnsweringBodyId = '17' THEN 1 END) AS Health_Questions,
+        COUNT(CASE WHEN AnsweringBodyId = '214' THEN 1 END) AS Econ_Questions
+     FROM 
+        All_Questions
+     GROUP BY 
+        MP, Party, Constituency) AS q
+JOIN 
+    (SELECT 
+        MP_Ages.MP,
+        MP_Ages.Age,
+        Left_Right_Scale.Value
+     FROM 
+        MP_Ages
+     JOIN 
+        Left_Right_Scale ON MP_Ages.MP = Left_Right_Scale.MP) AS d
+ON 
+    q.MP = d.MP;")
 
+party_constituency_table <- dbGetQuery(db, "SELECT 
+    AQ.MP,
+    AQ.Party,
+    AQ.Constituency,
+    CI.Constituency_ID,
+    CI.WageMedianConst,
+    COUNT(CASE WHEN AQ.AnsweringBodyId = '17' THEN 1 END) AS Health_Questions,
+    COUNT(CASE WHEN AQ.AnsweringBodyId = '214' THEN 1 END) AS Econ_Questions
+FROM 
+    All_Questions AQ
+JOIN 
+    Constituency_Med_Wages CI ON AQ.Constituency = CI.Constituency
+GROUP BY 
+    AQ.MP;")
 
+```
+```{r disconnect-d, eval = TRUE}
+dbDisconnect(db) #disconnect from the database
+```
+There are four aspects which were analysed during this project: party, constituency including constituency median wage, age and political left-right alignment.
 
+###Party
 
-```{r disconnect-db}
-dbDisconnect(db) #finally, disconnect from the database
+```{r party-barplot, eval = TRUE}
+party_data <- party_constituency_table %>% # aggregate data by party
+  group_by(Party) %>%
+  summarise(Health_Questions = sum(Health_Questions),
+            Econ_Questions = sum(Econ_Questions))
+
+party_data_long <- gather(party_data, Category, Count, -Party)
+
+party_plot <- ggplot(party_data_long, aes(x = Party, y = Count, fill = Category)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(title = "Health/Welfare and Business/Trade Questions by Party",
+       x = "Party",
+       y = "Number of Questions",
+       fill = "Answering Body") +
+  scale_fill_discrete(labels = c("Econ_Questions" = "Business/Trade Department", "Health_Questions" = "Health/Welfare Department")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.title = element_text(size = 10),  # Smaller legend title
+        legend.text = element_text(size = 8),   # Smaller legend text
+        legend.key.size = unit(0.5, "cm"))
 ```
 
+```{r, eval = TRUE}
+party_plot
+```
+
+
+
+###Constituency
+
+For each constituency, there are two aspects of interest: its geographic location and its economic standing, measured here using median wages.
+
+####Geographical location
+
+```{r constituency-map-health, eval = TRUE}
+all_constituencies <- constituency_wages %>%
+  left_join(party_constituency_table, by = "Constituency_ID") %>%
+  mutate(Health_Questions = ifelse(is.na(Health_Questions), 0, Health_Questions), Econ_Questions = ifelse(is.na(Econ_Questions), 0, Econ_Questions))
+
+constituencies_income_sf <- merge(west_hex_map, all_constituencies, by.x = "gss_code", by.y = "Constituency_ID")
+
+# set colour palette and custom breaks with labels
+custom_palette <- c("white", viridis::viridis(10))
+breaks <- c(0, 0.1, 2.1, 5.1, 10.1, 20.1, 30)
+labels <- c("0", "1-2", "3-5", "6-10", "11-19", "20-30")
+
+# making map showing median income of constituencies
+health_qs_map <- tm_shape(constituencies_income_sf) +
+  tm_borders() +
+  tm_fill(col = "Health_Questions",
+          palette = custom_palette,
+          breaks = breaks,
+          labels = labels,
+          title = "Number of Questions") +
+  tm_layout(frame = FALSE,
+            main.title = "Health/Welfare Questions from MPs",
+            main.title.position = "center",
+            legend.position = c(0.9, 0.5),
+            legend.text.size = 0.5, 
+            legend.title.size = 0.8, 
+            main.title.size = 0.65,
+            outer.margins = c(0.06, 0.06, 0.2, 0.06))
+```
+
+```{r, eval=TRUE}
+health_qs_map
+```
+
+
+```{r constituency-map-econ, eval = TRUE}
+econ_qs_map <- tm_shape(constituencies_income_sf) +
+  tm_borders() +
+  tm_fill(col = "Econ_Questions",
+          palette = custom_palette,
+          breaks = breaks,
+          labels = labels,
+          title = "Number of Questions") +
+  tm_layout(frame = FALSE,
+            main.title = "Business Questions from MPs",
+            main.title.position = "center",
+            legend.position = c(0.9, 0.5),
+            legend.text.size = 0.5, 
+            legend.title.size = 0.8, 
+            main.title.size = 0.75,
+            outer.margins = c(0.06, 0.06, 0.2, 0.06))
+```
+
+
+```{r, eval=TRUE}
+econ_qs_map
+```
+
+
+####Median Wage
+
+```{r health-plot-wage, eval = TRUE}
+Wage_Plot_Health <- ggplot(party_constituency_table, aes(x = WageMedianConst, y = Health_Questions)) +
+  geom_point() +
+  labs(title = "Relationship Between Wages in MP Constituency and Health/Welfare Questions asked by MP",
+       x = "Median Wage of MP Constituency in Pounds per Week",
+       y = "Number of Health/Welfare Questions asked by MP") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.title = element_text(size = 9),
+        axis.title = element_text(size = 9),
+        axis.text = element_text(size = 8))
+```
+
+
+```{r, eval = TRUE}
+Wage_Plot_Health
+```
+
+```{r econ-plot, eval = TRUE}
+Wage_Plot_Econ <- ggplot(party_constituency_table, aes(x = WageMedianConst, y = Econ_Questions)) +
+  geom_point() +
+  labs(title = "Relationship Between Wages in MP Constituency and Business/Trade Questions asked by MP",
+       x = "Median Wage of MP Constituency in Pounds per Week",
+       y = "Number of Business/Trade questions asked by MP") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.title = element_text(size = 9),
+        axis.title = element_text(size = 9),
+        axis.text = element_text(size = 8))
+```
+
+```{r, eval = TRUE}
+Wage_Plot_Econ
+```
+
+###Age
+
+```{r age-health-plot, eval = TRUE}
+Age_Health_Plot <- ggplot(age_alignment_table, aes(x = Age, y = Health_Questions)) +
+  geom_point() +
+  labs(title = "Relationship Between Age of MP and Health/Welfare Questions asked by MP",
+       x = "Age of MP",
+       y = "Number of Health/Welfare questions asked by MP") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.title = element_text(size = 10),
+        axis.title = element_text(size = 9),
+        axis.text = element_text(size = 8))
+```
+
+```{r, eval = TRUE, include = FALSE}
+Age_Health_Plot
+```
+```{r age-econ-plot, eval = TRUE}
+Age_Econ_Plot <- ggplot(age_alignment_table, aes(x = Age, y = Econ_Questions)) +
+  geom_point() +
+  labs(title = "Relationship Between Age of MP and Economy Questions asked by MP",
+       x = "Age of MP",
+       y = "Number of Business/Trade questions asked by MP") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.title = element_text(size = 10),
+        axis.title = element_text(size = 9),
+        axis.text = element_text(size = 8))
+```
+
+```{r, eval = TRUE, include = FALSE}
+Age_Econ_Plot
+```
+
+
+###Political Left-Right Alignment
+
+```{r leftright-plot, eval = TRUE}
+Alignment_Health_Plot <- ggplot(age_alignment_table, aes(x = Left_Right_Value, y = Health_Questions)) +
+  geom_point() +
+  labs(title = "Relationship Between Left-Right-Score of MP and Health/Welfare Questions asked by MP",
+       x = "Left-Right-Score of MP",
+       y = "Number of Health/Welfare Questions asked by MP") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.title = element_text(size = 9),
+        axis.title = element_text(size = 9),
+        axis.text = element_text(size = 8))
+```
+
+```{r, eval = TRUE}
+Alignment_Health_Plot
+```
+
+```{r leftright-econ-plot, eval = TRUE}
+Alignment_Econ_Plot <- ggplot(age_alignment_table, aes(x = Left_Right_Value, y = Econ_Questions)) +
+  geom_point() +
+  labs(title = "Relationship Between Left-Right-Score of MP and Business/Trade Questions asked by MP",
+       x = "Left-Right-Score of MP",
+       y = "Number of Business/Trade Questions asked by MP") +
+  theme_minimal() +
+  theme(panel.background = element_rect(fill = "white"),
+        plot.title = element_text(size = 9),
+        axis.title = element_text(size = 9),
+        axis.text = element_text(size = 8))
+```
+
+```{r, eval = TRUE}
+Alignment_Econ_Plot
+```
+## Appendix: All code in this assignment
+
+```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE} 
+
+```
