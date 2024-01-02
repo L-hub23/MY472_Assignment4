@@ -37,13 +37,13 @@ The DBT was only established in February 2023, and its predecessor was also resp
 
 Since written questions are answered throughout the year and to ensure comparability between frequency of oral and written questions to the specified departments between MPs, 175 written questions were sampled from the specified time frame. In order to avoid differing results due to outside events, 35 written questions were sampled for each department for each month in which an oral question session took place. The data was accessed through the UK Parliament API.
 
-Also considered was each MP's age, position on the political left-right scale and their constituency's median wage. 
+Also considered was each MP's age, position on the economic left-right scale and their constituency's median wage. 
 
-Information on the MP's ages was taken from [Wikipedia](https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election). In the case of age being given as a range, the smaller number was taken. 31 MPs were not captured by this method, 22 of which are Labour MPs. For 20 MPs, this is because they were elected in by-elections during the term. The last 11 have different spellings of their names, which means matching was not possible.
+Information on the MP's ages was taken from their Wikipedia pages, [based on a list of MPs elected in 2019](https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election). In the case of age being given as a range, the smaller number was taken. 31 MPs were not captured by this method, 22 of which are Labour MPs. For 20 MPs, this is because they were elected in by-elections during the term. The last 11 have different spellings of their names, which means matching was not possible.
 
-The MPs positions on the left-right scale were taken from a dataset created by [Royal Holloway, University of London](http://www.mpsleftright.co.uk). In this dataset, 42 MPs are missing, these were not included in the analysis. The dataset is based on comparisons between pairs of MPs, and a lower score signifies a more left-leaning MP.
+The MPs positions on the left-right scale were taken from a dataset created by [Royal Holloway, University of London and Survation](http://www.mpsleftright.co.uk). In this dataset, 42 MPs are missing, these were not included in the analysis. The dataset is based on comparisons between pairs of MPs, and a lower score signifies a more left-leaning MP.
 
-Constituency Median Wage was retrieved from [a dataset by the House of Commons](https://commonslibrary.parliament.uk/constituency-data-wages/). The constituency Weston-super-Mare is missing from this dataset and was not considered for the analysis.
+Constituency Median Wage was retrieved from [a dataset provided by the House of Commons based on data from the Office for National Statistics](https://commonslibrary.parliament.uk/constituency-data-wages/). The constituency Weston-super-Mare is missing and was not considered.
 
 ```{r oral-questions, eval=FALSE}
 
@@ -653,10 +653,9 @@ Alignment_Econ_Plot <- ggplot(age_alignment_table, aes(x = Left_Right_Value, y =
 Alignment_Econ_Plot
 ```
 
-In conclusion, it can be said that MPs who tend to ask questions about welfare issues tend to be from the Labour Party. Scottish MPs tend to ask more questions about economic issues.
+In conclusion, it can be said that MPs who tend to ask questions about welfare issues tend to be from the Labour Party, while Scottish MPs tend to ask more questions about economic issues.
 
 ## Appendix: All code in this assignment
-
 ```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE} 
 
 ```
