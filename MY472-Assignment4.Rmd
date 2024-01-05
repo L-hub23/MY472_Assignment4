@@ -316,9 +316,9 @@ info_extraction <- function(df) {
     if (length(current_age) > 0) {
       current_age <- gsub("[^0-9-]", "", current_age)
       if (grepl("-", current_age)) {
-      # If it's a range, take the middle value
+      # If it's a range, take the first value
         range_values <- as.numeric(strsplit(current_age, "-")[[1]])
-        current_age <- mean(range_values)
+        current_age <- range_values[1]
       } else {
       # If not a range, convert to integer
         current_age <- as.numeric(str_extract(current_age, "\\d+"))
@@ -583,6 +583,8 @@ Constituency wages do not seem to influence the frequency of questions asked for
 ### Age and Left-Right Alignment
 For the aspects of both age and left-right alignment, the following scatterplots show a similar trend.
 
+#### Age
+
 ```{r age-health-plot, eval = TRUE}
 Age_Health_Plot <- ggplot(age_alignment_table, aes(x = Age, y = Health_Questions)) +
   geom_point() +
@@ -617,7 +619,7 @@ Age_Econ_Plot
 ```
 
 
-###Political Left-Right Alignment
+#### Political Left-Right Alignment
 
 ```{r leftright-plot, eval = TRUE}
 Alignment_Health_Plot <- ggplot(age_alignment_table, aes(x = Left_Right_Value, y = Health_Questions)) +
@@ -654,6 +656,14 @@ Alignment_Econ_Plot
 ```
 
 In conclusion, it can be said that MPs who tend to ask questions about welfare issues tend to be from the Labour Party, while Scottish MPs tend to ask more questions about economic issues.
+
+## References
+
+Constituency data: wages (2023). House of Commons [Data set].
+
+Hanretty, C. (2023). *Estimates of MP positions* [Data set]. Royal Holloway, University of London & Survation.
+
+List of MPs elected in the 2019 United Kingdom general election (2023, December 28). In *Wikipedia*. https://en.wikipedia.org/wiki/List_of_MPs_elected_in_the_2019_United_Kingdom_general_election
 
 ## Appendix: All code in this assignment
 ```{r ref.label=knitr::all_labels(), echo=TRUE, eval=FALSE} 
